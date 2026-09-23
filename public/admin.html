@@ -1,0 +1,252 @@
+!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Abyatar Hotel — Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--espresso:#241611;--gold:#b8862c;--gold-light:#d9ab5c;--cream:#f6efe2;--paper:#fbf7ee;--ink:#2a201a;--line:#e4d7bd;--ok:#5c7a4f;--err:#a3423a;
+  box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--cream);color:var(--ink);font-family:'Inter',sans-serif;min-height:100vh}
+h1,h2{font-family:'Fraunces',serif;margin:0}
+.wrap{max-width:960px;margin:0 auto;padding:20px 16px 60px}
+header{background:var(--espresso);color:var(--cream);padding:16px;padding-top:calc(16px + env(safe-area-inset-top,0px));display:flex;justify-content:space-between;align-items:center}
+header h1{font-size:1.2rem;color:var(--gold-light)}
+.logout{background:none;border:1px solid var(--gold-light);color:var(--cream);padding:6px 12px;border-radius:3px;cursor:pointer;font-size:.82rem}
+.login-box{max-width:360px;margin:80px auto;background:var(--paper);border:1px solid var(--line);padding:28px;border-radius:4px}
+label{display:block;font-size:.85rem;font-weight:600;margin:12px 0 6px}
+input,select,textarea{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:3px;font-family:inherit;font-size:.92rem;background:#fff}
+button.primary{margin-top:16px;background:var(--gold);color:var(--espresso);border:none;padding:10px 18px;border-radius:3px;font-weight:600;cursor:pointer;width:100%}
+.err-msg{color:var(--err);font-size:.85rem;margin-top:10px;display:none}
+.tabs{display:flex;gap:6px;overflow-x:auto;margin:20px 0 16px;padding-bottom:4px}
+.tab{flex:0 0 auto;padding:8px 14px;border-radius:20px;background:var(--paper);border:1px solid var(--line);font-size:.85rem;cursor:pointer;white-space:nowrap}
+.tab.active{background:var(--espresso);color:var(--cream);border-color:var(--espresso)}
+.card{background:var(--paper);border:1px solid var(--line);border-radius:4px;padding:14px 16px;margin-bottom:10px;font-size:.88rem}
+.card-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.card-head strong{font-size:1rem}
+.badge{padding:3px 9px;border-radius:12px;font-size:.72rem;font-weight:600;text-transform:capitalize}
+.badge.pending{background:#f3e6c6;color:#7a5b12}
+.badge.confirmed,.badge.delivered,.badge.completed{background:#dcead4;color:#3d5433}
+.badge.cancelled{background:#f2dcda;color:#8a3a34}
+.badge.out_for_delivery{background:#dbe6f2;color:#2e4f70}
+.meta{color:#6b5c48;margin:2px 0}
+.row-actions{display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap}
+.row-actions select{width:auto;font-size:.8rem;padding:6px 8px}
+.empty{color:#8a7a63;padding:30px 0;text-align:center}
+.menu-form{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px;background:var(--paper);border:1px solid var(--line);padding:16px;border-radius:4px}
+.menu-form .full{grid-column:1/-1}
+.menu-item-row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--line);font-size:.88rem}
+.del-btn{background:none;border:1px solid var(--err);color:var(--err);border-radius:3px;padding:5px 10px;font-size:.78rem;cursor:pointer}
+.loading{padding:30px;text-align:center;color:#8a7a63}
+</style>
+</head>
+<body>
+<div id="loginView" class="login-box">
+  <h2>Admin sign in</h2>
+  <label>Email</label><input type="email" id="loginEmail">
+  <label>Password</label><input type="password" id="loginPassword">
+  <button class="primary" onclick="login()">Sign in</button>
+  <div class="err-msg" id="loginErr"></div>
+</div>
+
+<div id="appView" style="display:none">
+  <header>
+    <h1>Abyatar Admin</h1>
+    <button class="logout" onclick="logout()">Log out</button>
+  </header>
+  <div class="wrap">
+    <div class="tabs">
+      <div class="tab" data-t="orders" onclick="setTab('orders')">Orders</div>
+      <div class="tab" data-t="bookings" onclick="setTab('bookings')">Room Bookings</div>
+      <div class="tab" data-t="events" onclick="setTab('events')">Event Bookings</div>
+      <div class="tab" data-t="messages" onclick="setTab('messages')">Messages</div>
+      <div class="tab" data-t="menu" onclick="setTab('menu')">Menu</div>
+    </div>
+    <div id="content"><div class="loading">Loading…</div></div>
+  </div>
+</div>
+
+<script>
+let token = null;
+try{ token = localStorage.getItem('abyatar_admin_token'); }catch(e){}
+let currentTab = 'orders';
+
+async function api(path, opts={}){
+  const res = await fetch('/api'+path, {
+    ...opts,
+    headers: { 'Content-Type':'application/json', ...(token?{'Authorization':'Bearer '+token}:{}) , ...(opts.headers||{}) }
+  });
+  if(res.status===401){ logout(); throw new Error('Session expired'); }
+  if(!res.ok){ const b = await res.json().catch(()=>({})); throw new Error(b.error||'Request failed'); }
+  return res.status===204?null:res.json();
+}
+
+async function login(){
+  const email=document.getElementById('loginEmail').value, password=document.getElementById('loginPassword').value;
+  const err=document.getElementById('loginErr');
+  err.style.display='none';
+  try{
+    const res = await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.error||'Login failed');
+    token = data.token;
+    try{ localStorage.setItem('abyatar_admin_token', token); }catch(e){}
+    showApp();
+  }catch(e){
+    err.textContent = e.message;
+    err.style.display='block';
+  }
+}
+function logout(){
+  token=null;
+  try{ localStorage.removeItem('abyatar_admin_token'); }catch(e){}
+  document.getElementById('appView').style.display='none';
+  document.getElementById('loginView').style.display='block';
+}
+function showApp(){
+  document.getElementById('loginView').style.display='none';
+  document.getElementById('appView').style.display='block';
+  setTab('orders');
+}
+
+function setTab(t){
+  currentTab=t;
+  document.querySelectorAll('.tab').forEach(el=>el.classList.toggle('active', el.dataset.t===t));
+  render();
+}
+
+function fmtDate(d){ return d ? new Date(d).toLocaleDateString() : ''; }
+function money(n){ return Number(n).toLocaleString(); }
+
+const STATUS_OPTIONS = {
+  orders: ['pending','confirmed','out_for_delivery','delivered','cancelled'],
+  bookings: ['pending','confirmed','cancelled','completed'],
+  events: ['pending','confirmed','cancelled','completed']
+};
+
+async function render(){
+  const c = document.getElementById('content');
+  c.innerHTML = '<div class="loading">Loading…</div>';
+  try{
+    if(currentTab==='orders') return renderOrders();
+    if(currentTab==='bookings') return renderBookings();
+    if(currentTab==='events') return renderEvents();
+    if(currentTab==='messages') return renderMessages();
+    if(currentTab==='menu') return renderMenu();
+  }catch(e){
+    c.innerHTML = '<div class="empty">'+e.message+'</div>';
+  }
+}
+
+async function renderOrders(){
+  const list = await api('/orders');
+  const c = document.getElementById('content');
+  if(!list.length){ c.innerHTML='<div class="empty">No orders yet.</div>'; return; }
+  c.innerHTML = list.map(o=>`
+    <div class="card">
+      <div class="card-head"><strong>${o.customerName}</strong><span class="badge ${o.status}">${o.status.replace(/_/g,' ')}</span></div>
+      <div class="meta">${o.phone} · ${o.address}</div>
+      <div class="meta">${o.items.map(i=>i.quantity+'× '+i.name).join(', ')}</div>
+      <div class="meta">Total: ${money(o.total)} birr · ${fmtDate(o.createdAt)}</div>
+      <div class="row-actions">
+        <select onchange="updateStatus('orders','${o._id}',this.value)">
+          ${STATUS_OPTIONS.orders.map(s=>`<option value="${s}" ${s===o.status?'selected':''}>${s.replace(/_/g,' ')}</option>`).join('')}
+        </select>
+      </div>
+    </div>`).join('');
+}
+
+async function renderBookings(){
+  const list = await api('/bookings');
+  const c = document.getElementById('content');
+  if(!list.length){ c.innerHTML='<div class="empty">No bookings yet.</div>'; return; }
+  c.innerHTML = list.map(b=>`
+    <div class="card">
+      <div class="card-head"><strong>${b.customerName}</strong><span class="badge ${b.status}">${b.status}</span></div>
+      <div class="meta">${b.roomType} · ${b.guests} guest(s)</div>
+      <div class="meta">${fmtDate(b.checkIn)} → ${fmtDate(b.checkOut)} · $${b.totalPrice}</div>
+      <div class="meta">${b.email} · ${b.phone}</div>
+      ${b.specialRequests?`<div class="meta">Note: ${b.specialRequests}</div>`:''}
+      <div class="row-actions">
+        <select onchange="updateStatus('bookings','${b._id}',this.value)">
+          ${STATUS_OPTIONS.bookings.map(s=>`<option value="${s}" ${s===b.status?'selected':''}>${s}</option>`).join('')}
+        </select>
+      </div>
+    </div>`).join('');}
+
+async function renderEvents(){
+  const list = await api('/events');
+  const c = document.getElementById('content');
+  if(!list.length){ c.innerHTML='<div class="empty">No event requests yet.</div>'; return; }
+  c.innerHTML = list.map(ev=>`
+    <div class="card">
+      <div class="card-head"><strong>${ev.customerName}</strong><span class="badge ${ev.status}">${ev.status}</span></div>
+      <div class="meta">${ev.eventType} · ${fmtDate(ev.date)} · ${ev.expectedGuests} guests</div>
+      <div class="meta">${ev.email} · ${ev.phone}</div>
+      ${ev.requirements?`<div class="meta">Requirements: ${ev.requirements}</div>`:''}
+      <div class="row-actions">
+        <select onchange="updateStatus('events','${ev._id}',this.value)">
+          ${STATUS_OPTIONS.events.map(s=>`<option value="${s}" ${s===ev.status?'selected':''}>${s}</option>`).join('')}
+        </select>
+      </div>
+    </div>`).join('');
+}
+
+async function renderMessages(){
+  const list = await api('/contact');
+  const c = document.getElementById('content');
+  if(!list.length){ c.innerHTML='<div class="empty">No messages yet.</div>'; return; }
+  c.innerHTML = list.map(m=>`
+    <div class="card">
+      <div class="card-head"><strong>${m.subject}</strong></div>
+      <div class="meta">${m.name} · ${m.email} · ${fmtDate(m.createdAt)}</div>
+      <div class="meta">${m.message}</div>
+    </div>`).join('');
+}
+
+async function updateStatus(kind,id,status){
+  try{ await api('/'+kind+'/'+id+'/status', {method:'PATCH', body:JSON.stringify({status})}); render(); }
+  catch(e){ alert(e.message); }
+}
+
+async function renderMenu(){
+  const list = await api('/menu');
+  const c = document.getElementById('content');
+  const categories = ['Hot Drinks','Soft Drinks','Alcohol','Breakfast','Salads','Burgers','Pasta','Pizza','Main Dishes'];
+  c.innerHTML = `
+    <div class="menu-form">
+      <div><label>Name</label><input id="mName"></div>
+      <div><label>Price (birr)</label><input id="mPrice" type="number"></div>
+      <div class="full"><label>Category</label>
+        <select id="mCategory">${categories.map(cat=>`<option>${cat}</option>`).join('')}</select>
+      </div>
+      <div class="full"><button class="primary" onclick="addMenuItem()">Add item</button></div>
+    </div>
+    <div id="menuList"></div>`;
+  document.getElementById('menuList').innerHTML = list.map(m=>`
+    <div class="menu-item-row">
+      <span>${m.name} — ${money(m.price)} birr <span class="meta">(${m.category})</span></span>
+      <button class="del-btn" onclick="deleteMenuItem('${m._id}')">Delete</button>
+    </div>`).join('') || '<div class="empty">No menu items yet.</div>';
+}
+async function addMenuItem(){
+  const name=document.getElementById('mName').value, price=Number(document.getElementById('mPrice').value), category=document.getElementById('mCategory').value;
+  if(!name||!price){ alert('Enter a name and price.'); return; }
+  try{ await api('/menu', {method:'POST', body:JSON.stringify({name,price,category})}); renderMenu(); }
+  catch(e){ alert(e.message); }
+}
+async function deleteMenuItem(id){
+  if(!confirm('Delete this menu item?')) return;
+  try{ await api('/menu/'+id, {method:'DELETE'}); renderMenu(); }
+  catch(e){ alert(e.message); }
+}
+
+if(token) showApp();
+</script>
+</body>
+</html>
+
+  
+}
